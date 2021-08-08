@@ -1,0 +1,16 @@
+# data directory
+data
+
+# result directory
+results
+
+# python compiled files
+*.pyc
+
+# jupyter notebooks
+.ipynb_checkpoints
+.virtual_documents
+*.ipynb
+
+# manuscript
+manuscript
