@@ -5,6 +5,7 @@ Stream handlers.
 """
 import numpy as np
 from scipy.stats import chi2_contingency
+from scipy.special import softmax
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.cluster import KMeans
@@ -55,7 +56,7 @@ class SlidingWindow:
         self.window[i] = val
         self.count += 1
 
-    def full(self):
+    def is_full(self):
         """Detect whether the window is full."""
         return self.count >= self.window_size
 
@@ -81,7 +82,6 @@ class StreamHandler:
         self.min_mean = 0x7FFFFFFF
         self.min_std = 0x7FFFFFFF
         self.drift_lvl = 0
-        self.tca = None
 
     def reset(self):
         """Reset method."""
@@ -90,36 +90,32 @@ class StreamHandler:
         self.min_std = 0x7FFFFFFF
         self.drift_lvl = 0
 
-    def fit(self, x, y):
+    def fit(self, x, y, sample_weight=None):
         """Fit method."""
-        if self.tca is not None:
-            x = self.tca.trasfer(x)
-        self.learner.fit(x, y)
+        self.learner.fit(x, y, sample_weight=sample_weight)
 
-    def score(self, x, y):
+    def score(self, x, y, score_only=False):
         """Score method."""
         yhat = self.learner.predict(x)
-        score_ = (yhat - y) ** 2
-        self.score_window.append(score_)
-        if self.score_window.full():
-            current_mean = self.score_window.window.mean()
-            current_std = self.score_window.window.std()
-            if current_mean + current_std < self.min_mean + self.min_std:
-                self.min_mean = current_mean
-                self.min_std = current_std
-            if current_mean + current_std > \
-                    self.min_mean + self.drift_fa * self.min_std:
-                self.drift_lvl = 2
-            elif current_mean + current_std > \
-                    self.min_mean + self.warning_fa * self.min_std:
-                self.drift_lvl = 1
-            else:
-                self.drift_lvl = 0
-        return score_
-
-    def verified(self, x, y):
-        """Verify method."""
-        yhat = self.learner.predict(x)
-        score = (yhat - y) ** 2
-        return score.mean() + score.std() <= \
-            self.min_mean + self.drift_fa * self.min_std
+        scores = (yhat - y) ** 2
+        if not score_only:
+            for _score in scores:
+                self.score_window.append(_score)
+            if self.score_window.is_full():
+                current_mean = self.score_window.window.mean()
+                current_std = self.score_window.window.std()
+                if current_mean + current_std < self.min_mean + self.min_std:
+                    self.min_mean = current_mean
+                    self.min_std = current_std
+                if current_mean + current_std > \
+                        self.min_mean + self.drift_fa * self.min_std:
+                    self.drift_lvl = 2
+                elif current_mean + current_std > \
+                        self.min_mean + self.warning_fa * self.min_std:
+                    self.drift_lvl = 1
+                else:
+                    self.drift_lvl = 0
+        else:
+            scores = (scores - self.min_mean) / self.min_std
+            scores = softmax(scores)
+        return scores

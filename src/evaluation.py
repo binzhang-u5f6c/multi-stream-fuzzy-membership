@@ -66,12 +66,18 @@ def evaluate(dataset, training_size, w_size):
             else:
                 not_drift_list.append(i)
         for i in drift_list:
-            training_set = [i]
+            training_set = [j for j in not_drift_list]
+            training_set.append(i)
+            sample_weight = []
             for j in not_drift_list:
-                if dams[j].verified(x_train[:, i, :], y_train[:, i]):
-                    training_set.append(j)
+                sample_weight.append(dams[j].score(x_train[:, i, :],
+                                                   y_train[:, i],
+                                                   score_only=True))
             training_n = len(training_set) * w_size
+            sample_weight.append(np.ones(w_size))
+            sample_weight = np.hstack(sample_weight)
             dams[i].fit(x_train[:, training_set, :].reshape(training_n, -1),
-                        y_train[:, training_set].reshape(training_n))
+                        y_train[:, training_set].reshape(training_n),
+                        sample_weight=sample_weight)
             dams[i].reset()
     return scores
