@@ -11,6 +11,7 @@ import numpy as np
 from src.evaluation import evaluate
 
 for streams_name in ['train', 'weather', 'sensor']:
+    print("Stream {}...".format(streams_name))
     scores = evaluate(streams_name, 500, 50)
     with open('results/{}.npy'.format(streams_name), 'wb') as f:
         np.save(f, scores)

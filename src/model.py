@@ -5,7 +5,6 @@ Stream handlers.
 """
 import numpy as np
 from scipy.stats import chi2_contingency
-from scipy.special import softmax
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.cluster import KMeans
@@ -117,5 +116,5 @@ class StreamHandler:
                     self.drift_lvl = 0
         else:
             scores = (scores - self.min_mean) / self.min_std
-            scores = softmax(scores)
+            scores = 1 / (1 + np.exp(scores))
         return scores
