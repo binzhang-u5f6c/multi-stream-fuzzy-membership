@@ -51,7 +51,7 @@ def evaluate(dataset, training_size, w_size):
         drift_list = []
         for i in range(m):
             scores[0, t, i] = baseline[i].score(x[i, :].reshape(1, -1), y[i])
-            if baseline[i].drift_lvl == 2:
+            if t % w_size == 0 and baseline[i].drift_lvl == 2:
                 drift_list.append(i)
         for i in drift_list:
             baseline[i].fit(x_train[:, i, :], y_train[:, i])
@@ -61,7 +61,7 @@ def evaluate(dataset, training_size, w_size):
         not_drift_list = []
         for i in range(m):
             scores[1, t, i] = dams[i].score(x[i, :].reshape(1, -1), y[i])
-            if dams[i].drift_lvl == 2:
+            if t % w_size == 0 and dams[i].drift_lvl == 2:
                 drift_list.append(i)
             else:
                 not_drift_list.append(i)
