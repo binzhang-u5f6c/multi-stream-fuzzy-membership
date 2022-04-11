@@ -1,196 +1,87 @@
 # -*- coding: utf-8 -*-
-"""Test #2 & #3.
+"""Test #2.
 
-Evaluate multiple methods on two real-world data sets.
+Validation of FuzzMDD
 """
-from copy import deepcopy as dcp
-
 import numpy as np
-import matplotlib.pyplot as plt
+from sklearn import linear_model
+from skmultiflow.drift_detection.ddm import DDM
+from skmultiflow.drift_detection.hddm_a import HDDM_A
+from skmultiflow.drift_detection.hddm_w import HDDM_W
 
-from kdam.loader import TrainStreams
-from kdam.loader import WeatherStreams
-from kdam.loader import SensorStreams
-from kdam.model import StreamHandler
+from fuzzm.model import StreamHandler
 
+count = np.zeros((10, 4, 2))
+for i in range(10):
+    rng = np.random.default_rng(i)
+    x = rng.normal(0, 1, (1000, 10))
+    y = np.zeros((1000, 1))
+    w = rng.normal(0, 3, (10, 1))
+    b = np.ones((500, 1)) * rng.normal(0, 3, 1)
+    y[:500] = np.dot(x[:500], w) + b + rng.normal(0, 0.1, (500, 1))
+    w += rng.normal(0, 0.1+0.1*i, (10, 1))
+    b += rng.normal(0, 0.1+0.1*i, 1)
+    y[500:] = np.dot(x[500:], w) + b + rng.normal(0, 0.1, (500, 1))
 
-def get_streams(stream_name):
-    """Get a stream."""
-    if stream_name == 'train':
-        streams = TrainStreams()
-        m = 8
-        d = 11
-    elif stream_name == 'weather':
-        streams = WeatherStreams()
-        m = 10
-        d = 8
-    elif stream_name == 'sensor':
-        streams = SensorStreams()
-        m = 6
-        d = 3
-    return streams, m, d
+    for j in range(2000):
+        choice1 = rng.choice(500, 50, replace=False)
+        choice2 = rng.choice(500, 50, replace=False)
+        choice2 += 500
+        x1, x2 = x[choice1], x[choice2]
+        y1, y2 = y[choice1], y[choice2]
+        hdlr = StreamHandler(linear_model.Ridge(alpha=1), random_state=rng)
+        hdlr.fit(x1, y1, x2, y2)
+        choice3 = rng.choice(500, 50, replace=False)
+        flag = 0
+        if j % 2 == 0:
+            choice3 += 500
+            flag = 1
+        x3, y3 = x[choice3], y[choice3]
+        _, dr = hdlr.score(x3, y3)
+        if dr is True and flag == 1:
+            count[i, 0, 1] += 1
+        if dr is False and flag == 0:
+            count[i, 0, 0] += 1
 
-
-def evaluate(dataset, training_size, w_size, random_state=None):
-    """Evaluate a model on a dataset."""
-    # loading data
-    streams, m, d = get_streams(dataset)
-    x_train, y_train = streams[:training_size]
-
-    # initialize models
-    baseline = [dcp(StreamHandler('tree', random_state=random_state))
-                for _ in range(m)]
-    dams = [dcp(StreamHandler('tree', random_state=random_state))
-            for _ in range(m)]
-    ht = [dcp(StreamHandler('ht', random_state=random_state))
-          for _ in range(m)]
-    hat = [dcp(StreamHandler('hat', random_state=random_state))
-           for _ in range(m)]
-    ist = StreamHandler('ist', random_state=random_state)
-    for i in range(m):
-        baseline[i].fit(x_train[:, i, :], y_train[:, i])
-        dams[i].fit(x_train[:, i, :], y_train[:, i])
-    ist.fit(x_train.reshape(-1, m*d), y_train)
-
-    # start
-    n = len(streams)
-    batch_num = (n - training_size) // w_size
-    scores = np.zeros((5, batch_num, m))
-    for t in range(batch_num):
-        if t % 100 == 0:
-            print('>>> processing batch #{} of {}'.format(t, batch_num))
-        # get data
-        t1 = training_size + t * w_size
-        t2 = t1 + w_size
-        # x: ndarray of size(n, m, d), y: ndarray of size (n, m)
-        x, y = streams[t1:t2]
-
-        # baseline
-        drift_list = []
-        for i in range(m):
-            scores[0, t, i] = baseline[i].score(x[:, i, :], y[:, i]).mean()
-            if baseline[i].drift_lvl == 2:
-                drift_list.append(i)
-        for i in drift_list:
-            baseline[i].fit(x[:, i, :], y[:, i])
-            baseline[i].reset()
-
-        # dams
-        drift_list = []
-        not_drift_list = []
-        for i in range(m):
-            scores[1, t, i] = dams[i].score(x[:, i, :], y[:, i]).mean()
-            if dams[i].drift_lvl == 2:
-                drift_list.append(i)
+        rgr = linear_model.Ridge(alpha=1)
+        rgr.fit(x1, y1)
+        ybar1 = rgr.predict(x1)
+        mse = (ybar1 - y1) ** 2
+        mse.sort()
+        ybar2 = rgr.predict(x3)
+        ddm = DDM(50)
+        hddma = HDDM_A(warning_confidence=0.1)
+        hddmw = HDDM_W(warning_confidence=0.1)
+        for k in range(50):
+            if abs(ybar1[k] - y1[k])**2 > mse[-2]:
+                ddm.add_element(1)
+                hddma.add_element(1)
+                hddmw.add_element(1)
             else:
-                not_drift_list.append(i)
-        for i in drift_list:
-            training_set = [j for j in not_drift_list]
-            training_set.append(i)
-            sample_weight = []
-            for j in not_drift_list:
-                sample_weight_j = \
-                        dams[j].score(x[:, i, :], y[:, i], score_only=True)
-                sample_weight.append(np.ones(w_size)*sample_weight_j.mean())
-            sample_weight.append(np.ones(w_size))
-            sample_weight = np.hstack(sample_weight)
-            dams[i].fit(x[:, training_set, :].reshape(-1, d),
-                        y[:, training_set].reshape(-1),
-                        sample_weight=sample_weight)
-            dams[i].reset()
-
-        # ht
-        drift_list = []
-        for i in range(m):
-            scores[2, t, i] = ht[i].score(x[:, i, :], y[:, i]).mean()
-            if ht[i].drift_lvl == 2:
-                drift_list.append(i)
-        for i in drift_list:
-            ht[i].fit(x[:, i, :], y[:, i])
-            ht[i].reset()
-
-        # hat
-        drift_list = []
-        for i in range(m):
-            scores[3, t, i] = hat[i].score(x[:, i, :], y[:, i]).mean()
-            if hat[i].drift_lvl == 2:
-                drift_list.append(i)
-        for i in drift_list:
-            hat[i].fit(x[:, i, :], y[:, i])
-            hat[i].reset()
-
-        # iSOUPTree
-        scores[4, t, :] = ist.score(x.reshape(-1, m*d), y).mean(axis=0)
-        if ist.drift_lvl == 2:
-            ist.fit(x.reshape(-1, m*d), y)
-    return scores.mean(axis=1)
-
-
-if __name__ == "__main__":
-    result_train = np.zeros((6, 5, 8, 5))
-    result_sensor = np.zeros((6, 5, 6, 5))
-    for i in range(5):
-        rng = np.random.RandomState(i+1)
-        for j, w_size in enumerate([10, 20, 50, 100, 200, 500]):
-            print('Evaluate on train with batch size {}...'.format(w_size))
-            result_train[j, :, :, i] = \
-                evaluate('train', 500, w_size, random_state=rng)
-            print('Evaluate on sensor with batch size {}...'.format(w_size))
-            result_sensor[j, :, :, i] = \
-                evaluate('sensor', 500, w_size, random_state=rng)
-
-    # exp 2
-    for i in range(8):
-        plt.subplot(2, 4, i+1)
-        plt.title('Stream{}'.format(i+1))
-        plt.xlabel('Mini-batch size')
-        plt.ylabel('mean squared error')
-        plt.xticks(list(range(6)), [10, 20, 50, 100, 200, 500])
-        plt.plot(result_train[:, 0, i, :].mean(axis=3),
-                 '-*r', label='Baseline')
-        plt.plot(result_train[:, 1, i, :].mean(axis=3), '-*b', label='KDAM')
-        plt.legend()
-    plt.subplots_adjust(top=2, bottom=0, left=0, right=4)
-    plt.savefig('exp2train.png')
-    for i in range(6):
-        plt.subplot(2, 3, i+1)
-        plt.title('Stream{}'.format(i+1))
-        plt.xlabel('Mini-batch size')
-        plt.ylabel('mean squared error')
-        plt.xticks(list(range(6)), [10, 20, 50, 100, 200, 500])
-        plt.plot(result_sensor[:, 0, i, :].mean(axis=3),
-                 '-*r', label='Baseline')
-        plt.plot(result_sensor[:, 1, i, :].mean(axis=3), '-*b', label='KDAM')
-        plt.legend()
-    plt.subplots_adjust(top=2, bottom=0, left=0, right=3)
-    plt.savefig('exp2sensor.png')
-
-    # exp 3
-    for i in range(8):
-        print('{}'.format(i+1), end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_train[3, 2, i, :].mean(),
-                                            result_train[3, 2, i, :].std()),
-              end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_train[3, 3, i, :].mean(),
-                                            result_train[3, 3, i, :].std()),
-              end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_train[3, 4, i, :].mean(),
-                                            result_train[3, 4, i, :].std()),
-              end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_train[3, 0, i, :].mean(),
-                                            result_train[3, 0, i, :].std()),
-              end='&')
-    for i in range(6):
-        print('{}'.format(i+1), end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_sensor[3, 2, i, :].mean(),
-                                            result_sensor[3, 2, i, :].std()),
-              end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_sensor[3, 3, i, :].mean(),
-                                            result_sensor[3, 3, i, :].std()),
-              end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_sensor[3, 4, i, :].mean(),
-                                            result_sensor[3, 4, i, :].std()),
-              end='&')
-        print('{:.1f} $\\pm$ {:.1f}'.format(result_sensor[3, 0, i, :].mean(),
-                                            result_sensor[3, 0, i, :].std()),
-              end='&')
+                ddm.add_element(0)
+                hddma.add_element(0)
+                hddmw.add_element(0)
+        for k in range(50):
+            if (ybar2[k] - y3[k])**2 > mse[-2]:
+                ddm.add_element(1)
+                hddma.add_element(1)
+                hddmw.add_element(1)
+            else:
+                ddm.add_element(0)
+                hddma.add_element(0)
+                hddmw.add_element(0)
+        if ddm.detected_warning_zone() and flag == 1:
+            count[i, 1, 1] += 1
+        if hddma.detected_warning_zone() and flag == 1:
+            count[i, 2, 1] += 1
+        if hddmw.detected_warning_zone() and flag == 1:
+            count[i, 3, 1] += 1
+        if not ddm.detected_warning_zone() and flag == 0:
+            count[i, 1, 0] += 1
+        if not hddma.detected_warning_zone() and flag == 0:
+            count[i, 2, 0] += 1
+        if not hddmw.detected_warning_zone() and flag == 0:
+            count[i, 3, 0] += 1
+print("Completed!")
+with open('result2.npy', 'wb') as f:
+    np.save(f, count)
