@@ -108,7 +108,7 @@ class StreamHandler:
         if return_memb:
             return memb
         drift = rank_sum_test(self.hist_memb, memb)
-        return loss.mean(), drift
+        return loss, drift
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Validation of FuzzMDA on real-world data set Train.
+"""Evaluation of FuzzMDA on real-world data set Weather.
 
-Validation of FuzzMDA on real-world data set Train.
+Evaluation of FuzzMDA on real-world data set Weather.
 """
 import sys
 
@@ -11,11 +11,11 @@ from skmultiflow.trees import HoeffdingTreeRegressor
 from skmultiflow.trees import HoeffdingAdaptiveTreeRegressor
 from skmultiflow.meta import AdaptiveRandomForestRegressor
 
-from fuzzm.loader import TrainStreams
+from fuzzm.loader import WeatherStreams
 from fuzzm.model import StreamHandler
 
 # load data
-ss = TrainStreams()
+ss = WeatherStreams()
 n, m, d = ss.x.shape
 train_size = 500
 batch_size = int(sys.argv[1])
@@ -211,5 +211,5 @@ for i in range(N//10):
         yy = y[:, j].reshape(-1)
         arf2[j].partial_fit(xx, yy, x[:, jj, :], y[:, jj])
 
-with open('result3.train.{:03d}.npy'.format(batch_size), 'wb') as f:
+with open('result3.weather.{:03d}.npy'.format(batch_size), 'wb') as f:
     np.save(f, result)
